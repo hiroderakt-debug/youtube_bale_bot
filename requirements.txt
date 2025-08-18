@@ -1,4 +1,4 @@
-bale-bot
 fastapi
 uvicorn
 yt-dlp
+python-bale-bot
