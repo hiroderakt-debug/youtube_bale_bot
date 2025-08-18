@@ -2,4 +2,6 @@ asyncio
 requests
 yt-dlp
 python-bale-bot
+aiohttp
+aiogram 
 
