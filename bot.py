@@ -1,34 +1,39 @@
 import asyncio
-import re
+from fastapi import FastAPI
+import uvicorn
 from bale import Bot, Message
-from pytube import YouTube
-from aiohttp import web
+import yt_dlp
+import os
 
-# ربات Bale
 bot = Bot(token="210722128:ZVA73ro5RguzGOUUKstc1cDChCnSLfKExxmKTpvB")
+app = FastAPI()
 
-# تابع استخراج لینک یوتیوب از متن
-def extract_youtube_url(text):
-    pattern = r"(https?://(?:www\.)?(?:youtube\.com/watch\?v=|youtu\.be/)[^\s]+)"
-    match = re.search(pattern, text)
-    return match.group(0) if match else None
-
-# تابع پاک‌سازی لینک و استخراج Video ID
-def clean_youtube_url(url):
-    try:
-        if "youtu.be/" in url:
-            video_id = url.split("youtu.be/")[1].split("?")[0]
-        elif "youtube.com/watch?v=" in url:
-            video_id = url.split("v=")[1].split("&")[0]
-        else:
-            return None
-        return f"https://www.youtube.com/watch?v={video_id}"
-    except Exception:
-        return None
+@app.get("/")
+async def health_check():
+    return {"status": "✅ Bale bot is running."}
 
 @bot.event
 async def on_ready():
-    print("✅ ربات Bale آماده است.")
+    print("✅ ربات آماده است.")
+
+def extract_youtube_link(text: str) -> str | None:
+    if "youtube.com/watch" in text or "youtu.be/" in text:
+        return text.strip()
+    return None
+
+async def download_video(url: str, filename: str = "video.mp4") -> str | None:
+    ydl_opts = {
+        "format": "best[height<=360][ext=mp4]/best[ext=mp4]/best",
+        "outtmpl": filename,
+        "quiet": True,
+    }
+    try:
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            ydl.download([url])
+        return filename if os.path.exists(filename) else None
+    except Exception as e:
+        print(f"❌ Error downloading video: {e}")
+        return None
 
 @bot.event
 async def on_message(message: Message):
@@ -38,51 +43,30 @@ async def on_message(message: Message):
     text = message.content.strip()
 
     if text.lower() == "سلام":
-        await bot.send_message(chat_id=message.author.user_id, text="سلام 👋")
+        await bot.send_message(chat_id=message.author.user_id, text="سلام")
+        return
 
-    youtube_url = extract_youtube_url(text)
-    if youtube_url:
-        cleaned_url = clean_youtube_url(youtube_url)
-        if cleaned_url:
-            try:
-                yt = YouTube(cleaned_url)
-                title = yt.title
-                duration = yt.length
-                thumbnail = yt.thumbnail_url
-                channel = yt.author
-
-                response = (
-                    f"🎬 عنوان: {title}\n"
-                    f"📺 کانال: {channel}\n"
-                    f"⏱ مدت زمان: {duration} ثانیه\n"
-                    f"🖼 تصویر بندانگشتی:\n{thumbnail}"
-                )
-            except Exception as e:
-                response = f"❌ خطا در دریافت اطلاعات ویدیو:\n{str(e)}"
+    yt_link = extract_youtube_link(text)
+    if yt_link:
+        await bot.send_message(chat_id=message.author.user_id, text="⏳ در حال دانلود ویدیو...")
+        filename = await download_video(yt_link)
+        if filename:
+            await bot.send_message(chat_id=message.author.user_id, text="📤 ارسال ویدیو...")
+            await bot.send_file(chat_id=message.author.user_id, file=filename)
+            os.remove(filename)
         else:
-            response = "❌ لینک یوتیوب معتبر نیست."
+            await bot.send_message(chat_id=message.author.user_id, text="❌ خطا در دانلود ویدیو.")
 
-        await bot.send_message(chat_id=message.author.user_id, text=response)
+async def run_bot():
+    bot.run()
 
-# سرور پورت جعلی با aiohttp
-async def fake_port_handler(request):
-    return web.Response(text="✅ ربات Bale روی پورت جعلی 8080 فعال است.")
+async def run_api():
+    config = uvicorn.Config(app, host="0.0.0.0", port=10000, log_level="info")
+    server = uvicorn.Server(config)
+    await server.serve()
 
-async def start_fake_port():
-    app = web.Application()
-    app.router.add_get('/', fake_port_handler)
-    runner = web.AppRunner(app)
-    await runner.setup()
-    site = web.TCPSite(runner, 'localhost', 8080)
-    await site.start()
-    print("🌀 پورت جعلی فعال شد: http://localhost:8080")
-
-# اجرای همزمان ربات و پورت
 async def main():
-    await asyncio.gather(
-        start_fake_port(),
-        bot.run_async()
-    )
+    await asyncio.gather(run_bot(), run_api())
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     asyncio.run(main())
