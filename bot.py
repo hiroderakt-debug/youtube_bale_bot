@@ -1,4 +1,5 @@
 import asyncio
+import threading
 from fastapi import FastAPI
 import uvicorn
 from bale import Bot, Message
@@ -57,7 +58,7 @@ async def on_message(message: Message):
         else:
             await bot.send_message(chat_id=message.author.user_id, text="❌ خطا در دانلود ویدیو.")
 
-async def run_bot():
+def run_bot_thread():
     bot.run()
 
 async def run_api():
@@ -66,7 +67,8 @@ async def run_api():
     await server.serve()
 
 async def main():
-    await asyncio.gather(run_bot(), run_api())
+    threading.Thread(target=run_bot_thread, daemon=True).start()
+    await run_api()
 
 if __name__ == "__main__":
     asyncio.run(main())
