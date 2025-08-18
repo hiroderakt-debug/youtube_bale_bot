@@ -1,3 +1,5 @@
-aiofiles
+asyncio
+requests
 yt-dlp
 python-bale-bot
+
