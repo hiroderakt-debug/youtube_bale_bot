@@ -11,6 +11,9 @@ bot = Bot(token="210722128:ZVA73ro5RguzGOUUKstc1cDChCnSLfKExxmKTpvB")
 # 🔑 کلید API از Upload.io
 UPLOADIO_API_KEY = "your-uploadio-api-key"  # 🔁 جایگزین کن با کلید واقعی
 
+# 📁 مسیر امن کوکی‌ها در Render
+COOKIES_PATH = "/etc/secrets/cookies.txt"
+
 # 🔍 الگوی تشخیص لینک یوتیوب
 YOUTUBE_REGEX = r"(https?://)?(www\.)?(youtube\.com|youtu\.be)/[^\s]+"
 
@@ -29,7 +32,7 @@ async def start_fake_port():
     async with server:
         await server.serve_forever()
 
-# 📤 تابع آپلود فایل روی Upload.io
+# 📤 آپلود فایل روی Upload.io
 def upload_to_uploadio(filepath):
     try:
         headers = {
@@ -42,11 +45,29 @@ def upload_to_uploadio(filepath):
             response = requests.post("https://api.upload.io/v2/files", headers=headers, files=files)
             print("📤 پاسخ Upload.io:", response.status_code, response.text)
             if response.ok:
-                data = response.json()
-                return data["fileUrl"]
+                return response.json().get("fileUrl")
     except Exception as e:
         print(f"❌ خطا در آپلود: {e}")
     return None
+
+# 🎬 دانلود ویدیو با yt_dlp
+def download_youtube_video(url, output_file="video.mp4"):
+    if not os.path.exists(COOKIES_PATH):
+        raise FileNotFoundError("فایل کوکی پیدا نشد!")
+
+    ydl_opts = {
+        'outtmpl': output_file,
+        'format': 'mp4',
+        'quiet': True,
+        'cookies': COOKIES_PATH,
+        'noplaylist': True,
+        'retries': 3,
+        'no_warnings': True,
+        'ignoreerrors': True,
+    }
+
+    with YoutubeDL(ydl_opts) as ydl:
+        ydl.download([url])
 
 # 📩 رویداد آماده بودن ربات
 @bot.event
@@ -67,34 +88,28 @@ async def on_message(message: Message):
         return
 
     match = re.search(YOUTUBE_REGEX, text)
-    if match:
-        url = match.group(0)
-        await bot.send_message(chat_id=message.chat.id, text="⏳ در حال دانلود ویدیو...")
-
-        ydl_opts = {
-            'outtmpl': 'video.%(ext)s',
-            'format': 'mp4',
-            'quiet': True
-        }
-
-        try:
-            with YoutubeDL(ydl_opts) as ydl:
-                ydl.download([url])
-
-            if os.path.exists("video.mp4"):
-                link = upload_to_uploadio("video.mp4")
-                os.remove("video.mp4")
-
-                if link:
-                    await bot.send_message(chat_id=message.chat.id, text=f"✅ ویدیو آماده‌ست:\n{link}")
-                else:
-                    await bot.send_message(chat_id=message.chat.id, text="❌ خطا در آپلود فایل.")
-            else:
-                await bot.send_message(chat_id=message.chat.id, text="❌ مشکلی در دانلود فایل پیش آمد.")
-        except Exception as e:
-            await bot.send_message(chat_id=message.chat.id, text=f"❌ خطا: {str(e)}")
-    else:
+    if not match:
         await bot.send_message(chat_id=message.chat.id, text="لطفاً لینک معتبر یوتیوب بفرست.")
+        return
+
+    url = match.group(0)
+    await bot.send_message(chat_id=message.chat.id, text="⏳ در حال دانلود ویدیو...")
+
+    try:
+        download_youtube_video(url)
+
+        if os.path.exists("video.mp4"):
+            link = upload_to_uploadio("video.mp4")
+            os.remove("video.mp4")
+
+            if link:
+                await bot.send_message(chat_id=message.chat.id, text=f"✅ ویدیو آماده‌ست:\n{link}")
+            else:
+                await bot.send_message(chat_id=message.chat.id, text="❌ خطا در آپلود فایل.")
+        else:
+            await bot.send_message(chat_id=message.chat.id, text="❌ مشکلی در دانلود فایل پیش آمد.")
+    except Exception as e:
+        await bot.send_message(chat_id=message.chat.id, text=f"❌ خطا در پردازش: {str(e)}")
 
 # 🚀 اجرای ربات
 bot.run()
