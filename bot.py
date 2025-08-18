@@ -1,140 +1,83 @@
 import os
-import re
+import aiohttp
 import asyncio
-import requests
-from bale import Bot, Message
+from aiogram import Bot, Dispatcher, types
+from aiogram.types import FSInputFile
+from aiogram.filters import CommandStart
 from yt_dlp import YoutubeDL
 
-# 🎯 توکن ربات Bale
-bot = Bot(token="210722128:ZVA73ro5RguzGOUUKstc1cDChCnSLfKExxmKTpvB")
+BALE_TOKEN = "210722128:ZVA73ro5RguzGOUUKstc1cDChCnSLfKExxmKTpvB"
+ONE_API_TOKEN = "295736:68a316750afc5"
 
-# 🔑 کلید API از Upload.io
-UPLOADIO_API_KEY = "your-uploadio-api-key"  # 🔁 جایگزین کن با کلید واقعی
+bot = Bot(token=BALE_TOKEN)
+dp = Dispatcher()
 
-# 📁 مسیر امن کوکی‌ها در Render
-COOKIES_PATH = "/etc/secrets/cookies.txt"
+os.makedirs("assets", exist_ok=True)
+os.makedirs("merge", exist_ok=True)
 
-# 🔍 الگوی تشخیص لینک یوتیوب
-YOUTUBE_REGEX = r"(https?://)?(www\.)?(youtube\.com|youtu\.be)/[^\s]+"
+async def get_video_info(url):
+    video_id = url.split("/")[-1].split("?")[0]
+    api_url = f"https://youtube.one-api.ir/?token={ONE_API_TOKEN}&action=info&id={video_id}"
+    async with aiohttp.ClientSession() as session:
+        async with session.get(api_url) as resp:
+            return await resp.json()
 
-# 📡 سرور جعلی روی پورت 10000
-async def fake_server(reader, writer):
-    addr = writer.get_extra_info('peername')
-    print(f"📡 اتصال جعلی از {addr}")
-    writer.write("✅ این یه پورت تستیه روی 10000!\n".encode("utf-8"))
-    await writer.drain()
-    writer.close()
-
-async def start_fake_port():
-    server = await asyncio.start_server(fake_server, '0.0.0.0', 10000)
-    addr = server.sockets[0].getsockname()
-    print(f"✅ پورت جعلی روی {addr} باز شد.")
-    async with server:
-        await server.serve_forever()
-
-# 🔍 بررسی اعتبار کوکی‌ها
-def is_cookie_valid():
-    try:
-        cookies = {}
-        with open(COOKIES_PATH, "r") as f:
-            for line in f:
-                if not line.startswith("#") and line.strip():
-                    parts = line.strip().split("\t")
-                    if len(parts) >= 7:
-                        cookies[parts[5]] = parts[6]
-
-        response = requests.get("https://www.youtube.com", cookies=cookies)
-        return "Sign in" not in response.text and "verify" not in response.text
-    except Exception as e:
-        print(f"❌ خطا در بررسی کوکی: {e}")
-        return False
-
-# 📤 آپلود فایل روی Upload.io
-def upload_to_uploadio(filepath):
-    try:
-        headers = {
-            "Authorization": f"Bearer {UPLOADIO_API_KEY}"
-        }
-        with open(filepath, 'rb') as f:
-            files = {
-                "file": (os.path.basename(filepath), f)
-            }
-            response = requests.post("https://api.upload.io/v2/files", headers=headers, files=files)
-            print("📤 پاسخ Upload.io:", response.status_code, response.text)
-            if response.ok:
-                return response.json().get("fileUrl")
-    except Exception as e:
-        print(f"❌ خطا در آپلود: {e}")
-    return None
-
-# 🎬 دانلود ویدیو با yt_dlp
-def download_youtube_video(url, output_file="video.mp4"):
-    if not os.path.exists(COOKIES_PATH):
-        raise FileNotFoundError("فایل کوکی پیدا نشد!")
-
+def download_stream(url, filename):
     ydl_opts = {
-        'outtmpl': output_file,
-        'format': 'mp4',
-        'quiet': True,
-        'cookies': COOKIES_PATH,
-        'noplaylist': True,
-        'retries': 3,
-        'no_warnings': True,
-        'ignoreerrors': True,
+        "outtmpl": filename,
+        "quiet": True,
+        "no_warnings": True,
+        "merge_output_format": "mp4",
     }
+    with YoutubeDL(ydl_opts) as ydl:
+        ydl.download([url])
 
-    try:
-        with YoutubeDL(ydl_opts) as ydl:
-            ydl.download([url])
-    except Exception as e:
-        print(f"❌ خطا در yt_dlp: {e}")
-        return False
-    return True
+def merge_audio_video(video_path, audio_path, output_path):
+    os.system(f'ffmpeg -y -i "{video_path}" -i "{audio_path}" -c:v copy -c:a aac "{output_path}"')
 
-# 📩 رویداد آماده بودن ربات
-@bot.event
-async def on_ready():
-    print("🤖 ربات Bale آماده است.")
-    asyncio.create_task(start_fake_port())
+async def upload_to_transfer(file_path):
+    async with aiohttp.ClientSession() as session:
+        with open(file_path, "rb") as f:
+            async with session.post("https://transfer.sh/", data={"file": f}) as resp:
+                return await resp.text()
 
-# 📥 رویداد دریافت پیام
-@bot.event
-async def on_message(message: Message):
-    if getattr(message.chat, "type", None) != "private":
+@dp.message(CommandStart())
+async def start(msg: types.Message):
+    await msg.answer("سلام! لینک یوتیوب رو بفرست تا دانلود کنم 🎬")
+
+@dp.message()
+async def handle_url(msg: types.Message):
+    url = msg.text.strip()
+    await msg.answer("⏳ در حال دریافت اطلاعات ویدیو...")
+
+    info = await get_video_info(url)
+    if "streams" not in info:
+        await msg.answer("❌ خطا در دریافت اطلاعات. لطفاً لینک معتبر بفرست.")
         return
 
-    text = message.content.strip()
+    video_url = info["streams"]["video"][0]["url"]
+    audio_url = info["streams"]["audio"][0]["url"]
 
-    if text.lower() == "سلام":
-        await bot.send_message(chat_id=message.chat.id, text="سلام! لینک یوتیوب بفرست تا برات دانلود کنم.")
-        return
+    video_path = f"assets/video.mp4"
+    audio_path = f"assets/audio.mp4"
+    output_path = f"merge/final.mp4"
 
-    match = re.search(YOUTUBE_REGEX, text)
-    if not match:
-        await bot.send_message(chat_id=message.chat.id, text="لطفاً لینک معتبر یوتیوب بفرست.")
-        return
+    await msg.answer("📥 در حال دانلود ویدیو و صدا...")
+    loop = asyncio.get_event_loop()
+    await loop.run_in_executor(None, download_stream, video_url, video_path)
+    await loop.run_in_executor(None, download_stream, audio_url, audio_path)
 
-    url = match.group(0)
-    await bot.send_message(chat_id=message.chat.id, text="⏳ در حال بررسی کوکی‌ها...")
+    await msg.answer("🔀 در حال ادغام صدا و تصویر...")
+    merge_audio_video(video_path, audio_path, output_path)
 
-    if not is_cookie_valid():
-        await bot.send_message(chat_id=message.chat.id, text="❌ کوکی‌ها معتبر نیستن یا منقضی شدن. لطفاً آپدیتشون کن.")
-        return
-
-    await bot.send_message(chat_id=message.chat.id, text="✅ کوکی معتبره. در حال دانلود ویدیو...")
-
-    success = download_youtube_video(url)
-    if not success or not os.path.exists("video.mp4"):
-        await bot.send_message(chat_id=message.chat.id, text="❌ مشکلی در دانلود فایل پیش آمد.")
-        return
-
-    link = upload_to_uploadio("video.mp4")
-    os.remove("video.mp4")
-
-    if link:
-        await bot.send_message(chat_id=message.chat.id, text=f"✅ ویدیو آماده‌ست:\n{link}")
+    size_mb = os.path.getsize(output_path) / (1024 * 1024)
+    if size_mb < 50:
+        await msg.answer("📤 ارسال فایل نهایی...")
+        await msg.answer_document(FSInputFile(output_path))
     else:
-        await bot.send_message(chat_id=message.chat.id, text="❌ خطا در آپلود فایل.")
+        await msg.answer("📤 حجم زیاد است، در حال آپلود روی transfer.sh...")
+        link = await upload_to_transfer(output_path)
+        await msg.answer(f"✅ فایل آماده است:\n{link}")
 
-# 🚀 اجرای ربات
-bot.run()
+if __name__ == "__main__":
+    dp.run_polling(bot)
