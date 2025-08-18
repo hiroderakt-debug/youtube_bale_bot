@@ -1,11 +1,15 @@
 import os
 import re
 import asyncio
+import requests
 from bale import Bot, Message
 from yt_dlp import YoutubeDL
 
 # 🎯 توکن ربات Bale
 bot = Bot(token="210722128:ZVA73ro5RguzGOUUKstc1cDChCnSLfKExxmKTpvB")
+
+# 🔑 کلید API از Upload.io
+UPLOADIO_API_KEY = "your-uploadio-api-key"  # 🔁 جایگزین کن با کلید واقعی
 
 # 🔍 الگوی تشخیص لینک یوتیوب
 YOUTUBE_REGEX = r"(https?://)?(www\.)?(youtube\.com|youtu\.be)/[^\s]+"
@@ -25,11 +29,29 @@ async def start_fake_port():
     async with server:
         await server.serve_forever()
 
+# 📤 تابع آپلود فایل روی Upload.io
+def upload_to_uploadio(filepath):
+    try:
+        headers = {
+            "Authorization": f"Bearer {UPLOADIO_API_KEY}"
+        }
+        with open(filepath, 'rb') as f:
+            files = {
+                "file": (os.path.basename(filepath), f)
+            }
+            response = requests.post("https://api.upload.io/v2/files", headers=headers, files=files)
+            print("📤 پاسخ Upload.io:", response.status_code, response.text)
+            if response.ok:
+                data = response.json()
+                return data["fileUrl"]
+    except Exception as e:
+        print(f"❌ خطا در آپلود: {e}")
+    return None
+
 # 📩 رویداد آماده بودن ربات
 @bot.event
 async def on_ready():
     print("🤖 ربات Bale آماده است.")
-    # اجرای سرور جعلی در پس‌زمینه
     asyncio.create_task(start_fake_port())
 
 # 📥 رویداد دریافت پیام
@@ -40,18 +62,15 @@ async def on_message(message: Message):
 
     text = message.content.strip()
 
-    # پاسخ به سلام
     if text.lower() == "سلام":
         await bot.send_message(chat_id=message.chat.id, text="سلام! لینک یوتیوب بفرست تا برات دانلود کنم.")
         return
 
-    # بررسی لینک یوتیوب
     match = re.search(YOUTUBE_REGEX, text)
     if match:
         url = match.group(0)
         await bot.send_message(chat_id=message.chat.id, text="⏳ در حال دانلود ویدیو...")
 
-        # تنظیمات yt-dlp
         ydl_opts = {
             'outtmpl': 'video.%(ext)s',
             'format': 'mp4',
@@ -62,10 +81,14 @@ async def on_message(message: Message):
             with YoutubeDL(ydl_opts) as ydl:
                 ydl.download([url])
 
-            # ارسال فایل
             if os.path.exists("video.mp4"):
-                await bot.send_document(chat_id=message.chat.id, document="video.mp4")
+                link = upload_to_uploadio("video.mp4")
                 os.remove("video.mp4")
+
+                if link:
+                    await bot.send_message(chat_id=message.chat.id, text=f"✅ ویدیو آماده‌ست:\n{link}")
+                else:
+                    await bot.send_message(chat_id=message.chat.id, text="❌ خطا در آپلود فایل.")
             else:
                 await bot.send_message(chat_id=message.chat.id, text="❌ مشکلی در دانلود فایل پیش آمد.")
         except Exception as e:
