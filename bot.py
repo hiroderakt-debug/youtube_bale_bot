@@ -32,6 +32,23 @@ async def start_fake_port():
     async with server:
         await server.serve_forever()
 
+# 🔍 بررسی اعتبار کوکی‌ها
+def is_cookie_valid():
+    try:
+        cookies = {}
+        with open(COOKIES_PATH, "r") as f:
+            for line in f:
+                if not line.startswith("#") and line.strip():
+                    parts = line.strip().split("\t")
+                    if len(parts) >= 7:
+                        cookies[parts[5]] = parts[6]
+
+        response = requests.get("https://www.youtube.com", cookies=cookies)
+        return "Sign in" not in response.text and "verify" not in response.text
+    except Exception as e:
+        print(f"❌ خطا در بررسی کوکی: {e}")
+        return False
+
 # 📤 آپلود فایل روی Upload.io
 def upload_to_uploadio(filepath):
     try:
@@ -66,8 +83,13 @@ def download_youtube_video(url, output_file="video.mp4"):
         'ignoreerrors': True,
     }
 
-    with YoutubeDL(ydl_opts) as ydl:
-        ydl.download([url])
+    try:
+        with YoutubeDL(ydl_opts) as ydl:
+            ydl.download([url])
+    except Exception as e:
+        print(f"❌ خطا در yt_dlp: {e}")
+        return False
+    return True
 
 # 📩 رویداد آماده بودن ربات
 @bot.event
@@ -93,23 +115,26 @@ async def on_message(message: Message):
         return
 
     url = match.group(0)
-    await bot.send_message(chat_id=message.chat.id, text="⏳ در حال دانلود ویدیو...")
+    await bot.send_message(chat_id=message.chat.id, text="⏳ در حال بررسی کوکی‌ها...")
 
-    try:
-        download_youtube_video(url)
+    if not is_cookie_valid():
+        await bot.send_message(chat_id=message.chat.id, text="❌ کوکی‌ها معتبر نیستن یا منقضی شدن. لطفاً آپدیتشون کن.")
+        return
 
-        if os.path.exists("video.mp4"):
-            link = upload_to_uploadio("video.mp4")
-            os.remove("video.mp4")
+    await bot.send_message(chat_id=message.chat.id, text="✅ کوکی معتبره. در حال دانلود ویدیو...")
 
-            if link:
-                await bot.send_message(chat_id=message.chat.id, text=f"✅ ویدیو آماده‌ست:\n{link}")
-            else:
-                await bot.send_message(chat_id=message.chat.id, text="❌ خطا در آپلود فایل.")
-        else:
-            await bot.send_message(chat_id=message.chat.id, text="❌ مشکلی در دانلود فایل پیش آمد.")
-    except Exception as e:
-        await bot.send_message(chat_id=message.chat.id, text=f"❌ خطا در پردازش: {str(e)}")
+    success = download_youtube_video(url)
+    if not success or not os.path.exists("video.mp4"):
+        await bot.send_message(chat_id=message.chat.id, text="❌ مشکلی در دانلود فایل پیش آمد.")
+        return
+
+    link = upload_to_uploadio("video.mp4")
+    os.remove("video.mp4")
+
+    if link:
+        await bot.send_message(chat_id=message.chat.id, text=f"✅ ویدیو آماده‌ست:\n{link}")
+    else:
+        await bot.send_message(chat_id=message.chat.id, text="❌ خطا در آپلود فایل.")
 
 # 🚀 اجرای ربات
 bot.run()
