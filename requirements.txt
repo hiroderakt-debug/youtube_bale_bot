@@ -1,6 +1,3 @@
-fastapi
-uvicorn
+aiofiles
 yt-dlp
 python-bale-bot
-httpx
-beautifulsoup4
