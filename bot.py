@@ -129,7 +129,8 @@ async def on_message(message: Message):
     if getattr(message.chat, "type", None) != "private":
         return
     
-    user_id = message.chat.chat_id
+    # تصحیح: استفاده از message.chat.id به جای message.chat.chat_id
+    user_id = message.chat.id
     text = message.content.strip()
     
     if user_id in processing_users:
@@ -191,6 +192,7 @@ async def on_message(message: Message):
             
             try:
                 with open(temp_path, 'rb') as video_file:
+                    # تصحیح: استفاده از chat_id=user_id به جای chat_id=message.chat.chat_id
                     await bot.send_video(
                         chat_id=user_id,
                         video=video_file,
