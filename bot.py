@@ -4,8 +4,6 @@ import tempfile
 from bale import Bot, Message
 import aiohttp
 import re
-import json
-from urllib.parse import quote
 
 bot = Bot(token="210722128:ZVA73ro5RguzGOUUKstc1cDChCnSLfKExxmKTpvB")
 
@@ -22,12 +20,6 @@ PUBLIC_APIS = [
         'url': 'https://api.dlyoutube.com/api/converter',
         'method': 'POST', 
         'data': lambda url: {'url': url, 'format': 'mp4', 'quality': '360p'}
-    },
-    {
-        'name': 'loader',
-        'url': 'https://loader.to/api/extract',
-        'method': 'GET',
-        'params': lambda url: {'url': url, 'format': 'mp4'}
     }
 ]
 
@@ -90,15 +82,13 @@ def extract_download_url(data, api_name):
         return data.get('mp4', {}).get('links', {}).get('360p')
     elif api_name == 'dlyoutube':
         return data.get('url') or data.get('downloadUrl')
-    elif api_name == 'loader':
-        return data.get('url') or data.get('download_url')
     return None
 
 def extract_title(data, api_name):
     """استخراج عنوان ویدیو"""
     if api_name == 'yt5s':
         return data.get('title', 'ویدیو یوتیوب')
-    elif api_name in ['dlyoutube', 'loader']:
+    elif api_name == 'dlyoutube':
         return data.get('title') or data.get('meta', {}).get('title', 'ویدیو یوتیوب')
     return 'ویدیو یوتیوب'
 
@@ -129,7 +119,6 @@ async def on_message(message: Message):
     if getattr(message.chat, "type", None) != "private":
         return
     
-    # تصحیح: استفاده از message.chat.id به جای message.chat.chat_id
     user_id = message.chat.id
     text = message.content.strip()
     
@@ -142,8 +131,8 @@ async def on_message(message: Message):
             "🎥 **ربات دانلود یوتیوب**\n\n"
             "لینک یوتیوب را ارسال کنید تا آن را دانلود کنم.\n\n"
             "📋 **مثال‌ها:**\n"
-            "• `https://www.youtube.com/watch?v=...`\n"
-            "• `https://youtu.be/...`\n\n"
+            "• https://www.youtube.com/watch?v=...\n"
+            "• https://youtu.be/...\n\n"
             "⚡ **ویژگی‌ها:**\n"
             "• دانلود بدون نیاز به کوکی\n"
             "• کیفیت مناسب (360p)\n"
@@ -156,14 +145,16 @@ async def on_message(message: Message):
     if is_youtube_url(text):
         try:
             processing_users[user_id] = True
+            
+            # ارسال پیام اولیه
             processing_msg = await message.reply("⏳ در حال پردازش لینک...")
             
             # دریافت لینک دانلود
-            await processing_msg.edit_text("🔍 در حال پیدا کردن بهترین سرویس...")
+            await processing_msg.edit("🔍 در حال پیدا کردن بهترین سرویس...")
             download_url, video_title = await get_download_link(text)
             
             if not download_url:
-                await processing_msg.edit_text(video_title)
+                await processing_msg.edit(video_title)
                 return
             
             # ایجاد فایل موقت
@@ -171,11 +162,11 @@ async def on_message(message: Message):
                 temp_path = tmp_file.name
             
             # دانلود ویدیو
-            await processing_msg.edit_text("⬇️ در حال دانلود ویدیو...")
+            await processing_msg.edit("⬇️ در حال دانلود ویدیو...")
             success = await download_video(download_url, temp_path)
             
             if not success:
-                await processing_msg.edit_text("❌ خطا در دانلود ویدیو")
+                await processing_msg.edit("❌ خطا در دانلود ویدیو")
                 if os.path.exists(temp_path):
                     os.unlink(temp_path)
                 return
@@ -183,16 +174,15 @@ async def on_message(message: Message):
             # بررسی حجم
             file_size = os.path.getsize(temp_path)
             if file_size > 45 * 1024 * 1024:
-                await processing_msg.edit_text("❌ حجم ویدیو بیش از حد مجاز است (45MB)")
+                await processing_msg.edit("❌ حجم ویدیو بیش از حد مجاز است (45MB)")
                 os.unlink(temp_path)
                 return
             
             # ارسال ویدیو
-            await processing_msg.edit_text("📤 در حال آپلود...")
+            await processing_msg.edit("📤 در حال آپلود...")
             
             try:
                 with open(temp_path, 'rb') as video_file:
-                    # تصحیح: استفاده از chat_id=user_id به جای chat_id=message.chat.chat_id
                     await bot.send_video(
                         chat_id=user_id,
                         video=video_file,
@@ -200,10 +190,11 @@ async def on_message(message: Message):
                         supports_streaming=True
                     )
                 
+                # حذف پیام پردازش
                 await processing_msg.delete()
                 
             except Exception as upload_error:
-                await processing_msg.edit_text(f"❌ خطا در آپلود: {upload_error}")
+                await processing_msg.edit(f"❌ خطا در آپلود: {upload_error}")
             
             finally:
                 if os.path.exists(temp_path):
