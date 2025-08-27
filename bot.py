@@ -6,7 +6,6 @@ import json
 from bale import Bot, Message
 from yt_dlp import YoutubeDL
 import aiohttp
-from urllib.parse import quote
 
 bot = Bot(token="210722128:ZVA73ro5RguzGOUUKstc1cDChCnSLfKExxmKTpvB")
 
@@ -39,8 +38,8 @@ def natural_size(num):
         num /= 1024.0
     return "%.1f PB" % num
 
-async def download_media(url, format_type="video", user_id=None):
-    """دانلود رسانه از یوتیوب"""
+def download_media_sync(url, format_type="video"):
+    """دانلود رسانه از یوتیوب (همگام)"""
     try:
         ensure_dirs()
         
@@ -138,9 +137,9 @@ async def on_message(message: Message):
                 f"⏳ در حال دانلود {'صدا' if format_type == 'audio' else 'ویدیو'}..."
             )
             
-            # دانلود رسانه
-            file_path, title = await asyncio.to_thread(
-                download_media, url, format_type, user_id
+            # دانلود رسانه در thread جداگانه
+            file_path, title = await asyncio.get_event_loop().run_in_executor(
+                None, download_media_sync, url, format_type
             )
             
             if not file_path:
@@ -168,7 +167,7 @@ async def on_message(message: Message):
                             chat_id=user_id,
                             audio=audio_file,
                             caption=f"🎵 {title}",
-                            title=title[:64]  # محدودیت طول عنوان
+                            title=title[:64] if title else "YouTube Audio"
                         )
                 else:
                     with open(file_path, 'rb') as video_file:
@@ -187,7 +186,10 @@ async def on_message(message: Message):
             finally:
                 # حذف فایل موقت
                 if os.path.exists(file_path):
-                    os.remove(file_path)
+                    try:
+                        os.remove(file_path)
+                    except:
+                        pass
                     
         except Exception as e:
             await message.reply(f"❌ خطای سیستمی: {str(e)}")
