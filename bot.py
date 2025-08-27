@@ -6,6 +6,7 @@ import json
 from bale import Bot, Message
 from yt_dlp import YoutubeDL
 import aiohttp
+import threading
 
 bot = Bot(token="210722128:ZVA73ro5RguzGOUUKstc1cDChCnSLfKExxmKTpvB")
 
@@ -29,14 +30,6 @@ def is_youtube_url(text):
 def sanitize(s):
     """پاکسازی نام فایل"""
     return re.sub(r'[\/\\\:\*\?"<>\|]', '_', s)
-
-def natural_size(num):
-    """تبدیل حجم به فرمت خوانا"""
-    for unit in ['B','KB','MB','GB','TB']:
-        if abs(num) < 1024.0:
-            return "%3.1f %s" % (num, unit)
-        num /= 1024.0
-    return "%.1f PB" % num
 
 def download_media_sync(url, format_type="video"):
     """دانلود رسانه از یوتیوب (همگام)"""
@@ -138,9 +131,7 @@ async def on_message(message: Message):
             )
             
             # دانلود رسانه در thread جداگانه
-            file_path, title = await asyncio.get_event_loop().run_in_executor(
-                None, download_media_sync, url, format_type
-            )
+            file_path, title = download_media_sync(url, format_type)
             
             if not file_path:
                 await processing_msg.edit(f"❌ {title}")
@@ -154,7 +145,10 @@ async def on_message(message: Message):
             file_size = os.path.getsize(file_path)
             if file_size > 50 * 1024 * 1024:
                 await processing_msg.edit("❌ حجم فایل بیش از حد مجاز است (50MB)")
-                os.remove(file_path)
+                try:
+                    os.remove(file_path)
+                except:
+                    pass
                 return
             
             # ارسال فایل
